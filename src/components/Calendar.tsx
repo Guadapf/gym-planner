@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, TouchableOpacity, View as RNView } from 'react-native';
 import { Text } from './Themed';
 import { colors, spacing } from './Themed';
+import { formatDateLocal } from '../utils/dateUtils';
 
 interface CalendarProps {
   year: number;
@@ -122,7 +123,7 @@ export const Calendar: React.FC<CalendarProps> = ({
 
 function toIso(year: number, month: number, day: number): string {
   const d = new Date(year, month, day);
-  return d.toISOString().slice(0, 10);
+  return formatDateLocal(d);
 }
 
 const styles = StyleSheet.create({

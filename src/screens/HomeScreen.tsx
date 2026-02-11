@@ -9,6 +9,7 @@ import { colors, spacing } from '../components/Themed';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { StorageService } from '../storage/storageService';
 import { AppConfig, HistorialEntrenamiento, Rutina, Usuario } from '../models/types';
+import { getToday } from '../utils/dateUtils';
 import { obtenerIndiceRutinaParaHoy } from '../services/rotationService';
 
 type Nav = NativeStackScreenProps<RootStackParamList>['navigation'];
@@ -39,8 +40,7 @@ export const HomeScreen: React.FC = () => {
     }, [cargarDatos]),
   );
 
-  const today = new Date();
-  const fechaHoy = today.toISOString().slice(0, 10);
+  const fechaHoy = getToday();
 
   const indiceRutina =
     config && rutinas.length > 0

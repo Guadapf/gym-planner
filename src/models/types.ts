@@ -7,8 +7,10 @@ export interface Usuario {
 export interface Ejercicio {
   id: UUID;
   nombre: string;
+  tipo: 'repeticiones' | 'tiempo';
   series: number;
-  repeticiones: number;
+  repeticiones?: number;
+  duracionSegundos?: number;
   descansoEntreSeries: number; // segundos, >= 0
 }
 

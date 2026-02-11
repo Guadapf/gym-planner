@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, StyleSheet, TouchableOpacity, Vibration, View as RNView } from 'react-native';
+import { Image, ScrollView, StyleSheet, TouchableOpacity, Vibration, View as RNView } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -10,17 +10,27 @@ import { HistorialEntrenamiento, Rutina } from '../models/types';
 import { StorageService } from '../storage/storageService';
 import { v4 as uuidv4 } from 'uuid';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
+import { getToday } from '../utils/dateUtils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Entrenamiento'>;
+
+type Phase = 'preview' | 'active' | 'summary' | 'finished';
 
 export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
   const { rutinaId, indiceRutina } = route.params;
   const [rutina, setRutina] = useState<Rutina | null>(null);
+  const [phase, setPhase] = useState<Phase>('preview');
+
   const [ejercicioIndex, setEjercicioIndex] = useState(0);
   const [serieActual, setSerieActual] = useState(1);
   const [descansoRestante, setDescansoRestante] = useState<number | null>(null);
+
+  // Para ejercicios de tiempo
+  const [tiempoActivo, setTiempoActivo] = useState<number | null>(null);
+  const [enEjercicio, setEnEjercicio] = useState(false);
+
   const [historial, setHistorial] = useState<HistorialEntrenamiento[]>([]);
-  const [mostrarMeme, setMostrarMeme] = useState(false);
   const [memeSource, setMemeSource] = useState<
     | ReturnType<typeof require>
     | null
@@ -28,6 +38,7 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const pulse = useSharedValue(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const activeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const memeSources = [
     require('../../assets/memes/meme-1.png'),
@@ -55,6 +66,12 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     [rutina, ejercicioIndex],
   );
 
+  const proximoEjercicio = useMemo(
+    () => (rutina && ejercicioIndex < rutina.ejercicios.length - 1 ? rutina.ejercicios[ejercicioIndex + 1] : null),
+    [rutina, ejercicioIndex]
+  );
+
+  // Timer de descanso (existente)
   useEffect(() => {
     if (descansoRestante === null) return;
     if (descansoRestante <= 0) {
@@ -76,6 +93,28 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [descansoRestante, pulse]);
 
+  // Timer de ejercicio activo (nuevo para tipo 'tiempo')
+  useEffect(() => {
+    if (!enEjercicio || tiempoActivo === null) return;
+
+    if (tiempoActivo <= 0) {
+      // Tiempo completado, finalizar serie automáticamente
+      setEnEjercicio(false);
+      setTiempoActivo(null);
+      Vibration.vibrate(500); // Vibración más larga al terminar ejercicio
+      completeSerieLogic();
+      return;
+    }
+
+    activeTimerRef.current = setTimeout(() => {
+      setTiempoActivo(prev => (prev !== null ? prev - 1 : null));
+    }, 1000);
+
+    return () => {
+      activeTimerRef.current && clearTimeout(activeTimerRef.current);
+    }
+  }, [tiempoActivo, enEjercicio]);
+
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [
       {
@@ -85,30 +124,53 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     opacity: 0.6 + pulse.value * 0.4,
   }));
 
-  const handleCompletarSerie = () => {
-    if (!ejercicioActual) return;
-    if (descansoRestante !== null) {
-      // Bloqueamos completar serie mientras hay descanso activo
-      return;
+  const startSeriesTime = () => {
+    if (ejercicioActual?.tipo === 'tiempo' && ejercicioActual.duracionSegundos) {
+      setTiempoActivo(ejercicioActual.duracionSegundos);
+      setEnEjercicio(true);
     }
+  };
+
+  const completeSerieLogic = () => {
+    if (!ejercicioActual) return;
+
     if (serieActual < ejercicioActual.series) {
       setSerieActual(serieActual + 1);
       if (ejercicioActual.descansoEntreSeries > 0) {
         setDescansoRestante(ejercicioActual.descansoEntreSeries);
       }
     } else {
-      if (ejercicioIndex < (rutina?.ejercicios.length ?? 0) - 1) {
-        setEjercicioIndex(ejercicioIndex + 1);
-        setSerieActual(1);
-        const siguiente = rutina?.ejercicios[ejercicioIndex + 1];
-        if (siguiente && siguiente.descansoEntreSeries > 0) {
-          setDescansoRestante(siguiente.descansoEntreSeries);
-        } else {
-          setDescansoRestante(null);
-        }
+      // Fin del ejercicio
+      setPhase('summary');
+    }
+  };
+
+  const handleCompletarSerie = () => {
+    if (!ejercicioActual) return;
+    if (descansoRestante !== null) return;
+
+    if (ejercicioActual.tipo === 'tiempo') {
+      if (!enEjercicio) {
+        startSeriesTime();
       } else {
-        finalizarEntrenamiento();
+        // Opción de terminar antes (skip)
+        setEnEjercicio(false);
+        setTiempoActivo(null);
+        completeSerieLogic();
       }
+    } else {
+      // Repeticiones
+      completeSerieLogic();
+    }
+  };
+
+  const avanzarSiguienteEjercicio = () => {
+    if (ejercicioIndex < (rutina?.ejercicios.length ?? 0) - 1) {
+      setEjercicioIndex(ejercicioIndex + 1);
+      setSerieActual(1);
+      setPhase('active');
+    } else {
+      finalizarEntrenamiento();
     }
   };
 
@@ -118,7 +180,7 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
-    const fecha = new Date().toISOString().slice(0, 10);
+    const fecha = getToday();
     const entrada: HistorialEntrenamiento = {
       id: uuidv4(),
       fecha,
@@ -131,10 +193,10 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     await StorageService.saveHistorial(updated);
     const randomIndex = Math.floor(Math.random() * memeSources.length);
     setMemeSource(memeSources[randomIndex]);
-    setMostrarMeme(true);
+    setPhase('finished');
   };
-  
-  if (mostrarMeme && memeSource) {
+
+  if (phase === 'finished' && memeSource) {
     return (
       <ScreenContainer>
         <RNView style={styles.memeContainer}>
@@ -144,10 +206,7 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
           <RNView style={styles.memeActions}>
             <PrimaryButton
               label="Volver al inicio"
-              onPress={() => {
-                setMostrarMeme(false);
-                navigation.goBack();
-              }}
+              onPress={() => navigation.goBack()}
             />
           </RNView>
         </RNView>
@@ -155,26 +214,115 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  if (!rutina || !ejercicioActual) {
+  if (!rutina) {
     return (
       <ScreenContainer>
         <RNView style={styles.center}>
-          <Text>Cargando entrenamiento...</Text>
+          <Text>Cargando...</Text>
         </RNView>
       </ScreenContainer>
     );
   }
 
-  const totalEjercicios = rutina.ejercicios.length;
+  // PREVIEW PHASE
+  if (phase === 'preview') {
+    return (
+      <ScreenContainer>
+        <RNView style={styles.container}>
+          <Text style={styles.previewTitle}>Tu entrenamiento de hoy</Text>
+          <Text style={styles.previewSubtitle}>{rutina.nombre}</Text>
+
+          <ScrollView style={styles.exerciseList} contentContainerStyle={{ gap: spacing.sm }}>
+            {rutina.ejercicios.map((ex, idx) => (
+              <RNView key={ex.id} style={styles.previewCard}>
+                <RNView style={styles.previewIndexCircle}>
+                  <Text style={styles.previewIndexText}>{idx + 1}</Text>
+                </RNView>
+                <RNView>
+                  <Text style={styles.previewCardTitle}>{ex.nombre}</Text>
+                  <Text style={styles.previewCardDetails}>
+                    {ex.tipo === 'tiempo'
+                      ? `${ex.series} series x ${ex.duracionSegundos}s`
+                      : `${ex.series} series x ${ex.repeticiones} reps`
+                    }
+                  </Text>
+                </RNView>
+              </RNView>
+            ))}
+          </ScrollView>
+
+          <RNView style={styles.actions}>
+            <PrimaryButton label="Comenzar entrenamiento" onPress={() => setPhase('active')} />
+          </RNView>
+        </RNView>
+      </ScreenContainer>
+    );
+  }
+
+  // EXERCISE SUMMARY PHASE
+  if (phase === 'summary') {
+    const completed = rutina.ejercicios.slice(0, ejercicioIndex + 1);
+    const pending = rutina.ejercicios.slice(ejercicioIndex + 1);
+
+    return (
+      <ScreenContainer>
+        <RNView style={styles.container}>
+          <Text style={styles.summaryTitle}>¡Ejercicio completado!</Text>
+          <Text style={styles.summarySubtitle}>Gran trabajo, sigue así.</Text>
+
+          <ScrollView style={styles.exerciseList} contentContainerStyle={{ gap: spacing.sm }}>
+            <Text style={styles.sectionHeader}>Completados</Text>
+            {completed.map((ex, idx) => (
+              <RNView key={ex.id} style={[styles.previewCard, styles.cardCompleted]}>
+                <Ionicons name="checkmark-circle" size={24} color={colors.success} />
+                <Text style={[styles.previewCardTitle, { textDecorationLine: 'line-through', opacity: 0.7 }]}>{ex.nombre}</Text>
+              </RNView>
+            ))}
+
+            {pending.length > 0 && (
+              <>
+                <Text style={styles.sectionHeader}>Pendientes</Text>
+                {pending.map((ex, idx) => (
+                  <RNView key={ex.id} style={styles.previewCard}>
+                    <RNView style={[styles.previewIndexCircle, { backgroundColor: colors.border }]}>
+                      <Text style={styles.previewIndexText}>{ejercicioIndex + 1 + idx + 1}</Text>
+                    </RNView>
+                    <Text style={styles.previewCardTitle}>{ex.nombre}</Text>
+                  </RNView>
+                ))}
+              </>
+            )}
+          </ScrollView>
+
+          <RNView style={styles.actions}>
+            <PrimaryButton
+              label={pending.length === 0 ? "Finalizar Rutina" : "Continuar al siguiente"}
+              onPress={avanzarSiguienteEjercicio}
+            />
+          </RNView>
+        </RNView>
+      </ScreenContainer>
+    );
+  }
+
+  // ACTIVE PHASE
+  if (!ejercicioActual) return null;
+
+  const esTiempo = ejercicioActual.tipo === 'tiempo';
+  const mostrarBotonCompletar = !esTiempo || (esTiempo && !enEjercicio);
+
+  const textoBoton = esTiempo
+    ? (enEjercicio ? 'En curso...' : 'Iniciar Tiempo')
+    : 'Completar serie';
 
   return (
     <ScreenContainer>
       <RNView style={styles.container}>
         <RNView style={styles.headerSection}>
           <Text style={styles.title}>
-            {rutina.nombre} – {ejercicioActual.nombre}
+            {rutina.nombre}
           </Text>
-          
+          <Text style={styles.activeExerciseTitle}>{ejercicioActual.nombre}</Text>
         </RNView>
 
         <RNView style={styles.card}>
@@ -188,22 +336,48 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
           ) : (
             <RNView style={styles.subtitleContainer}>
               <Text style={styles.subtitle}>
-                {ejercicioActual.series} x {ejercicioActual.repeticiones} · Serie {serieActual} de {ejercicioActual.series}
+                Serie {serieActual} de {ejercicioActual.series}
               </Text>
-              <Text style={styles.ready}>Listo para la siguiente serie 💪</Text>
+              <Text style={styles.activeDetails}>
+                {esTiempo
+                  ? `Objetivo: ${ejercicioActual.duracionSegundos} segundos`
+                  : `${ejercicioActual.repeticiones} Repeticiones`
+                }
+              </Text>
+
+              {esTiempo && enEjercicio && (
+                <RNView style={styles.timerLargeContainer}>
+                  <Text style={styles.timerLargeText}>{tiempoActivo}s</Text>
+                </RNView>
+              )}
+
+              {/* Next Exercise Indicator on last set */}
+              {serieActual === ejercicioActual.series && proximoEjercicio && (
+                <RNView style={styles.nextExerciseContainer}>
+                  <Text style={styles.nextLabel}>Próximo:</Text>
+                  <Text style={styles.nextValue}>{proximoEjercicio.nombre}</Text>
+                </RNView>
+              )}
             </RNView>
           )}
         </RNView>
 
         <RNView style={styles.actions}>
           <PrimaryButton
-            label={descansoRestante !== null ? 'En descanso...' : 'Completar serie'}
+            label={descansoRestante !== null ? 'En descanso...' : textoBoton}
             onPress={handleCompletarSerie}
-            disabled={descansoRestante !== null}
+            disabled={descansoRestante !== null || (esTiempo && enEjercicio)}
           />
-          <TouchableOpacity onPress={finalizarEntrenamiento}>
-            <Text style={styles.skip}>Terminar entrenamiento</Text>
-          </TouchableOpacity>
+          {esTiempo && enEjercicio && (
+            <TouchableOpacity onPress={() => { setEnEjercicio(false); setTiempoActivo(null); }}>
+              <Text style={styles.skip}>Detener</Text>
+            </TouchableOpacity>
+          )}
+          {!enEjercicio && (
+            <TouchableOpacity onPress={finalizarEntrenamiento}>
+              <Text style={styles.skip}>Terminar entrenamiento</Text>
+            </TouchableOpacity>
+          )}
         </RNView>
       </RNView>
     </ScreenContainer>
@@ -225,21 +399,32 @@ const styles = StyleSheet.create({
   },
   headerSection: {
     marginBottom: spacing.sm,
-    marginTop: spacing.xl,
+    marginTop: spacing.md,
   },
   title: {
-    fontSize: 40,
+    fontSize: 14,
+    color: colors.textMuted,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  activeExerciseTitle: {
+    fontSize: 32,
     fontWeight: '700',
-    marginBottom: spacing.xs,
   },
   subtitle: {
-    fontSize: 30,
-    fontWeight: '500',
-    color: colors.textMuted,
+    fontSize: 24,
+    fontWeight: '600',
+    marginBottom: spacing.xs,
   },
   subtitleContainer: {
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  activeDetails: {
+    fontSize: 18,
+    color: colors.primary,
+    fontWeight: '500',
   },
   card: {
     marginTop: spacing.sm,
@@ -248,6 +433,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.cardElevated,
     borderWidth: 1,
     borderColor: colors.border,
+    minHeight: 250,
+    justifyContent: 'center',
   },
   restContainer: {
     alignItems: 'center',
@@ -272,11 +459,6 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '700',
     color: colors.primary,
-  },
-  ready: {
-    paddingVertical: spacing.xs,
-    color: colors.textMuted,
-    textAlign: 'center',
   },
   actions: {
     gap: spacing.sm,
@@ -313,6 +495,107 @@ const styles = StyleSheet.create({
   },
   memeActions: {
     width: '100%',
+  },
+  // Preview & Summary Styles
+  previewTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    marginTop: spacing.xl,
+  },
+  previewSubtitle: {
+    fontSize: 16,
+    color: colors.textMuted,
+    marginBottom: spacing.lg,
+  },
+  exerciseList: {
+    flex: 1,
+  },
+  previewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    padding: spacing.md,
+    borderRadius: 12,
+    gap: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  cardCompleted: {
+    backgroundColor: colors.cardElevated,
+    opacity: 0.8,
+  },
+  previewIndexCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewIndexText: {
+    color: '#000',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  previewCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  previewCardDetails: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  summaryTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    marginTop: spacing.xl,
+    color: colors.success,
+  },
+  summarySubtitle: {
+    fontSize: 16,
+    color: colors.textMuted,
+    marginBottom: spacing.lg,
+  },
+  sectionHeader: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  // Timer specific
+  timerLargeContainer: {
+    marginVertical: spacing.md,
+    padding: spacing.lg,
+    backgroundColor: colors.card,
+    borderRadius: 100,
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  timerLargeText: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  nextExerciseContainer: {
+    marginTop: spacing.md,
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  nextLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+  },
+  nextValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
   },
 });
 

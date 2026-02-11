@@ -19,10 +19,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RutinaEditor'>;
 
+type EjercicioForm = Omit<Ejercicio, 'series' | 'repeticiones' | 'duracionSegundos' | 'descansoEntreSeries'> & {
+  series: string;
+  repeticiones: string;
+  duracionSegundos: string;
+  descansoEntreSeries: string;
+};
+
 export const RutinaEditorScreen: React.FC<Props> = ({ route, navigation }) => {
   const { rutinaId } = route.params || {};
   const [nombre, setNombre] = useState('');
-  const [ejercicios, setEjercicios] = useState<Ejercicio[]>([]);
+  const [ejercicios, setEjercicios] = useState<EjercicioForm[]>([]);
 
   useEffect(() => {
     if (!rutinaId) return;
@@ -31,36 +38,48 @@ export const RutinaEditorScreen: React.FC<Props> = ({ route, navigation }) => {
       const rutina = rutinas.find((r) => r.id === rutinaId);
       if (rutina) {
         setNombre(rutina.nombre);
-        setEjercicios(rutina.ejercicios);
+        setEjercicios(
+          rutina.ejercicios.map((e) => ({
+            ...e,
+            series: String(e.series),
+            repeticiones: e.repeticiones ? String(e.repeticiones) : '',
+            duracionSegundos: e.duracionSegundos ? String(e.duracionSegundos) : '',
+            descansoEntreSeries: String(e.descansoEntreSeries),
+          }))
+        );
       }
     })();
   }, [rutinaId]);
 
   const handleAgregarEjercicio = () => {
-    const nuevo: Ejercicio = {
+    const nuevo: EjercicioForm = {
       id: uuidv4(),
       nombre: 'Nuevo ejercicio',
-      series: 3,
-      repeticiones: 10,
-      descansoEntreSeries: 60,
+      tipo: 'repeticiones',
+      series: '3',
+      repeticiones: '10',
+      duracionSegundos: '',
+      descansoEntreSeries: '60',
     };
     setEjercicios((prev) => [...prev, nuevo]);
   };
 
-  const handleCambiarCampo = (id: string, campo: keyof Ejercicio, valor: string) => {
+  const handleCambiarCampo = (id: string, campo: keyof EjercicioForm, valor: string) => {
     setEjercicios((prev) =>
       prev.map((e) => {
         if (e.id !== id) return e;
-        if (campo === 'nombre') {
-          return { ...e, nombre: valor };
+        if (campo === 'nombre') return { ...e, nombre: valor };
+        if (campo === 'tipo') {
+          const nuevoTipo = valor as 'repeticiones' | 'tiempo';
+          return {
+            ...e,
+            tipo: nuevoTipo,
+            repeticiones: nuevoTipo === 'repeticiones' ? '10' : '',
+            duracionSegundos: nuevoTipo === 'tiempo' ? '60' : '',
+          };
         }
-        const num = parseInt(valor, 10);
-        if (Number.isNaN(num)) return e;
-        if (campo === 'series') return { ...e, series: Math.max(1, num) };
-        if (campo === 'repeticiones') return { ...e, repeticiones: Math.max(1, num) };
-        if (campo === 'descansoEntreSeries')
-          return { ...e, descansoEntreSeries: Math.max(0, num) };
-        return e;
+        // Allow any string value for numeric fields
+        return { ...e, [campo]: valor };
       }),
     );
   };
@@ -79,28 +98,65 @@ export const RutinaEditorScreen: React.FC<Props> = ({ route, navigation }) => {
       Alert.alert('Ejercicios requeridos', 'Agregá al menos un ejercicio.');
       return;
     }
+
+    const ejerciciosProcesados: Ejercicio[] = [];
+
     for (const e of ejercicios) {
       if (!e.nombre.trim()) {
         Alert.alert('Nombre requerido', 'Todos los ejercicios deben tener nombre.');
         return;
       }
-      if (e.series <= 0 || e.repeticiones <= 0 || e.descansoEntreSeries < 0) {
-        Alert.alert('Datos inválidos', 'Revisá series, repeticiones y descanso.');
+
+      const series = parseInt(e.series, 10);
+      const descanso = parseInt(e.descansoEntreSeries, 10);
+
+      if (isNaN(series) || series <= 0) {
+        Alert.alert('Datos inválidos', `Series inválidas en ${e.nombre}`);
         return;
       }
+      if (isNaN(descanso) || descanso < 0) {
+        Alert.alert('Datos inválidos', `Descanso inválido en ${e.nombre}`);
+        return;
+      }
+
+      const nuevo: Ejercicio = {
+        id: e.id,
+        nombre: e.nombre,
+        tipo: e.tipo,
+        series,
+        descansoEntreSeries: descanso,
+      };
+
+      if (e.tipo === 'repeticiones') {
+        const reps = parseInt(e.repeticiones, 10);
+        if (isNaN(reps) || reps <= 0) {
+          Alert.alert('Datos inválidos', `Repeticiones inválidas en ${e.nombre}`);
+          return;
+        }
+        nuevo.repeticiones = reps;
+      } else {
+        const duracion = parseInt(e.duracionSegundos, 10);
+        if (isNaN(duracion) || duracion <= 0) {
+          Alert.alert('Datos inválidos', `Duración inválida en ${e.nombre}`);
+          return;
+        }
+        nuevo.duracionSegundos = duracion;
+      }
+
+      ejerciciosProcesados.push(nuevo);
     }
 
     const rutinas = await StorageService.getRutinas();
     let updated: Rutina[];
     if (rutinaId) {
       updated = rutinas.map((r) =>
-        r.id === rutinaId ? { ...r, nombre: nombreTrim, ejercicios } : r,
+        r.id === rutinaId ? { ...r, nombre: nombreTrim, ejercicios: ejerciciosProcesados } : r,
       );
     } else {
       const nueva: Rutina = {
         id: uuidv4(),
         nombre: nombreTrim,
-        ejercicios,
+        ejercicios: ejerciciosProcesados,
       };
       updated = [...rutinas, nueva];
     }
@@ -108,52 +164,87 @@ export const RutinaEditorScreen: React.FC<Props> = ({ route, navigation }) => {
     navigation.goBack();
   };
 
-  const renderItem = ({ item }: { item: Ejercicio }) => (
-    <RNView style={styles.exerciseCard}>
-      <RNView style={styles.exerciseHeader}>
-        <Text style={styles.exerciseTitle}>{item.nombre}</Text>
-        <TouchableOpacity onPress={() => handleEliminarEjercicio(item.id)}>
-          <Text style={styles.delete}>Eliminar</Text>
-        </TouchableOpacity>
+  const renderItem = ({ item }: { item: EjercicioForm }) => {
+    const esTiempo = item.tipo === 'tiempo';
+
+    return (
+      <RNView style={styles.exerciseCard}>
+        <RNView style={styles.exerciseHeader}>
+          <Text style={styles.exerciseTitle}>{item.nombre}</Text>
+          <TouchableOpacity onPress={() => handleEliminarEjercicio(item.id)}>
+            <Text style={styles.delete}>Eliminar</Text>
+          </TouchableOpacity>
+        </RNView>
+
+        <TextInput
+          style={styles.input}
+          value={item.nombre}
+          placeholder="Nombre del ejercicio"
+          placeholderTextColor={colors.textMuted}
+          onChangeText={(text) => handleCambiarCampo(item.id, 'nombre', text)}
+        />
+
+        <RNView style={styles.typeSelector}>
+          <TouchableOpacity
+            style={[styles.typeButton, !esTiempo && styles.typeButtonActive]}
+            onPress={() => handleCambiarCampo(item.id, 'tipo', 'repeticiones')}
+          >
+            <Text style={[styles.typeText, !esTiempo && styles.typeTextActive]}>Repeticiones</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.typeButton, esTiempo && styles.typeButtonActive]}
+            onPress={() => handleCambiarCampo(item.id, 'tipo', 'tiempo')}
+          >
+            <Text style={[styles.typeText, esTiempo && styles.typeTextActive]}>Tiempo</Text>
+          </TouchableOpacity>
+        </RNView>
+
+        <RNView style={styles.row}>
+          <RNView style={styles.rowField}>
+            <Text style={styles.label}>Series</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={item.series}
+              onChangeText={(text) => handleCambiarCampo(item.id, 'series', text)}
+            />
+          </RNView>
+
+          {esTiempo ? (
+            <RNView style={styles.rowField}>
+              <Text style={styles.label}>Segundos</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="number-pad"
+                value={item.duracionSegundos}
+                onChangeText={(text) => handleCambiarCampo(item.id, 'duracionSegundos', text)}
+              />
+            </RNView>
+          ) : (
+            <RNView style={styles.rowField}>
+              <Text style={styles.label}>Reps</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="number-pad"
+                value={item.repeticiones}
+                onChangeText={(text) => handleCambiarCampo(item.id, 'repeticiones', text)}
+              />
+            </RNView>
+          )}
+
+          <RNView style={styles.rowField}>
+            <Text style={styles.label}>Descanso (s)</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={item.descansoEntreSeries}
+              onChangeText={(text) => handleCambiarCampo(item.id, 'descansoEntreSeries', text)}
+            />
+          </RNView>
+        </RNView>
       </RNView>
-      <TextInput
-        style={styles.input}
-        value={item.nombre}
-        placeholder="Nombre del ejercicio"
-        placeholderTextColor={colors.textMuted}
-        onChangeText={(text) => handleCambiarCampo(item.id, 'nombre', text)}
-      />
-      <RNView style={styles.row}>
-        <RNView style={styles.rowField}>
-          <Text style={styles.label}>Series</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="number-pad"
-            value={String(item.series)}
-            onChangeText={(text) => handleCambiarCampo(item.id, 'series', text)}
-          />
-        </RNView>
-        <RNView style={styles.rowField}>
-          <Text style={styles.label}>Reps</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="number-pad"
-            value={String(item.repeticiones)}
-            onChangeText={(text) => handleCambiarCampo(item.id, 'repeticiones', text)}
-          />
-        </RNView>
-        <RNView style={styles.rowField}>
-          <Text style={styles.label}>Descanso (s)</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="number-pad"
-            value={String(item.descansoEntreSeries)}
-            onChangeText={(text) => handleCambiarCampo(item.id, 'descansoEntreSeries', text)}
-          />
-        </RNView>
-      </RNView>
-    </RNView>
-  );
+    );
+  };
 
   return (
     <ScreenContainer>
@@ -231,7 +322,7 @@ const styles = StyleSheet.create({
   exerciseCard: {
     padding: spacing.md,
     borderRadius: 12,
-    backgroundColor:  colors.cardElevated,
+    backgroundColor: colors.cardElevated,
     borderWidth: 1,
     borderColor: colors.border,
     marginBottom: spacing.xs,
@@ -265,6 +356,34 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginBottom: spacing.xl,
+  },
+  typeSelector: {
+    flexDirection: 'row',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    backgroundColor: colors.card,
+    borderRadius: 8,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  typeButton: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  typeButtonActive: {
+    backgroundColor: colors.primary + '20', // Light opacity primary
+  },
+  typeText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  typeTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
   },
 });
 
