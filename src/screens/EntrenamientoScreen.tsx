@@ -34,6 +34,8 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     require('../../assets/memes/meme-2.png'),
     require('../../assets/memes/meme-3.png'),
     require('../../assets/memes/meme-4.png'),
+    require('../../assets/memes/meme-5.png'),
+    require('../../assets/memes/meme-6.png'),
   ];
 
   useEffect(() => {
