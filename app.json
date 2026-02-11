@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "rutine-planner",
+    "name": "Rutine Planner",
     "slug": "rutine-planner",
-    "version": "1.0.0",
+    "version": "1.0.0-beta.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#050814"
     },
     "ios": {
       "supportsTablet": true
@@ -18,13 +18,19 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#050814"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.guadapf.rutineplanner"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a6c4a4c2-5a38-45ce-bc90-32e03923a503"
+      }
     }
   }
 }
