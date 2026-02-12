@@ -37,6 +37,16 @@ export interface HistorialEntrenamiento {
   indiceRutina: number;
 }
 
+export interface EntrenamientoEnProgreso {
+  rutinaId: UUID;
+  fecha: string; // YYYY-MM-DD
+  ejercicioIndex: number;
+  serieActual: number;
+  subEjercicioIndex: number;
+  tipoEjercicio?: 'repeticiones' | 'tiempo' | 'superset';
+  timestamp: number; // Date.now()
+}
+
 export interface AppConfig {
   cantidadRutinasActivas: number;
 }

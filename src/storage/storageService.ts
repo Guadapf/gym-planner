@@ -52,5 +52,15 @@ export const StorageService = {
   saveHistorial(historial: HistorialEntrenamiento[]): Promise<void> {
     return saveObject(STORAGE_KEYS.HISTORIAL, historial);
   },
+
+  getProgreso(): Promise<import('../models/types').EntrenamientoEnProgreso | null> {
+    return loadObject<import('../models/types').EntrenamientoEnProgreso | null>('progreso_entrenamiento', null);
+  },
+  saveProgreso(progreso: import('../models/types').EntrenamientoEnProgreso): Promise<void> {
+    return saveObject('progreso_entrenamiento', progreso);
+  },
+  clearProgreso(): Promise<void> {
+    return AsyncStorage.removeItem('progreso_entrenamiento');
+  },
 };
 

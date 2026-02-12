@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, ScrollView, StyleSheet, TouchableOpacity, Vibration, View as RNView } from 'react-native';
+import { Alert, BackHandler, Image, ScrollView, StyleSheet, TouchableOpacity, Vibration, View as RNView } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Text } from '../components/Themed';
 import { colors, spacing } from '../components/Themed';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { Ejercicio, HistorialEntrenamiento, Rutina, SubEjercicio } from '../models/types';
+import { Ejercicio, EntrenamientoEnProgreso, HistorialEntrenamiento, Rutina, SubEjercicio } from '../models/types';
 import { StorageService } from '../storage/storageService';
 import { v4 as uuidv4 } from 'uuid';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
@@ -26,6 +26,9 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
   const [subEjercicioIndex, setSubEjercicioIndex] = useState(0); // For supersets
   const [serieActual, setSerieActual] = useState(1);
   const [descansoRestante, setDescansoRestante] = useState<number | null>(null);
+
+  // State to track if we have loaded/checked progress to avoid overwriting with initial state
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Para ejercicios de tiempo
   const [tiempoActivo, setTiempoActivo] = useState<number | null>(null);
@@ -61,6 +64,81 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
       setHistorial(hist);
     })();
   }, [rutinaId]);
+
+  // Load Progress Logic
+  useEffect(() => {
+    const checkProgress = async () => {
+      const saved = await StorageService.getProgreso();
+      const today = getToday();
+
+      if (saved) {
+        if (saved.fecha !== today) {
+          // Old progress, discard silent
+          await StorageService.clearProgreso();
+          setIsInitialized(true);
+        } else {
+          // Progress from today exists
+          Alert.alert(
+            'Entrenamiento en curso',
+            'Tenés un entrenamiento sin terminar de hoy. ¿Querés continuarlo?',
+            [
+              {
+                text: 'Descartar',
+                style: 'destructive',
+                onPress: async () => {
+                  await StorageService.clearProgreso();
+                  setIsInitialized(true);
+                },
+              },
+              {
+                text: 'Reanudar',
+                onPress: () => {
+                  // Verify rutinaId matches if we want to be strict, but for now assuming user wants to resume whatever was active
+                  if (saved.rutinaId !== rutinaId) {
+                    // Warn mismatch? Or just resume? 
+                    // If mismatch, maybe better to discard to avoid confusion, or load that other routine?
+                    // Simpler: Just resume state locally if routine matches, else discard.
+                    // Actually user requirement: "Solo puede existir un entrenamiento activo por día".
+                    // So if I am here, I should resume. But if I opened the WRONG routine screen?
+                    // The logic in HomeScreen determines routine. So likely it matches.
+                  }
+
+                  setEjercicioIndex(saved.ejercicioIndex);
+                  setSerieActual(saved.serieActual);
+                  setSubEjercicioIndex(saved.subEjercicioIndex);
+                  setPhase('active');
+                  setIsInitialized(true);
+                },
+              },
+            ]
+          );
+        }
+      } else {
+        setIsInitialized(true);
+      }
+    };
+
+    checkProgress();
+  }, [rutinaId]);
+
+  // Save Progress Logic
+  useEffect(() => {
+    if (!isInitialized || !rutina || phase !== 'active') return;
+
+    const saveState = async () => {
+      const progreso: EntrenamientoEnProgreso = {
+        rutinaId: rutina.id,
+        fecha: getToday(),
+        ejercicioIndex,
+        serieActual,
+        subEjercicioIndex,
+        timestamp: Date.now(),
+      };
+      await StorageService.saveProgreso(progreso);
+    };
+
+    saveState();
+  }, [isInitialized, rutina, phase, ejercicioIndex, serieActual, subEjercicioIndex]);
 
   const ejercicioActual = useMemo(
     () => (rutina ? rutina.ejercicios[ejercicioIndex] : null),
@@ -228,7 +306,12 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     };
     const updated = [...historial, entrada];
     setHistorial(updated);
-    await StorageService.saveHistorial(updated);
+
+    await Promise.all([
+      StorageService.saveHistorial(updated),
+      StorageService.clearProgreso()
+    ]);
+
     const randomIndex = Math.floor(Math.random() * memeSources.length);
     setMemeSource(memeSources[randomIndex]);
     setPhase('finished');

@@ -49,8 +49,10 @@ export const HomeScreen: React.FC = () => {
 
   const rutinaDeHoy = rutinas[indiceRutina];
 
+  const entrenamientoCompletadoHoy = historial.some((h) => h.fecha === fechaHoy);
+
   const handleEntrenarHoy = () => {
-    if (!rutinaDeHoy) return;
+    if (!rutinaDeHoy || entrenamientoCompletadoHoy) return;
     navigation.navigate('Entrenamiento', {
       rutinaId: rutinaDeHoy.id,
       indiceRutina,
@@ -83,12 +85,19 @@ export const HomeScreen: React.FC = () => {
           )}
           <RNView style={{ marginTop: spacing.sm }}>
             <PrimaryButton
-              label={rutinaDeHoy ? 'Entrenar hoy' : 'Configurar rutinas'}
-              onPress={
-                rutinaDeHoy
-                  ? handleEntrenarHoy
-                  : () => navigation.navigate('Main', { screen: 'Rutinas' })
+              label={
+                !rutinaDeHoy
+                  ? 'Configurar rutinas'
+                  : entrenamientoCompletadoHoy
+                    ? '¡Entrenamiento completado!'
+                    : 'Entrenar hoy'
               }
+              onPress={
+                rutinaDeHoy && !entrenamientoCompletadoHoy
+                  ? handleEntrenarHoy
+                  : () => !rutinaDeHoy && navigation.navigate('Main', { screen: 'Rutinas' })
+              }
+              disabled={!!rutinaDeHoy && entrenamientoCompletadoHoy}
             />
           </RNView>
         </RNView>
