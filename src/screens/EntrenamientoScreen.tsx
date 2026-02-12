@@ -6,7 +6,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { Text } from '../components/Themed';
 import { colors, spacing } from '../components/Themed';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { HistorialEntrenamiento, Rutina } from '../models/types';
+import { Ejercicio, HistorialEntrenamiento, Rutina, SubEjercicio } from '../models/types';
 import { StorageService } from '../storage/storageService';
 import { v4 as uuidv4 } from 'uuid';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
@@ -23,6 +23,7 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
   const [phase, setPhase] = useState<Phase>('preview');
 
   const [ejercicioIndex, setEjercicioIndex] = useState(0);
+  const [subEjercicioIndex, setSubEjercicioIndex] = useState(0); // For supersets
   const [serieActual, setSerieActual] = useState(1);
   const [descansoRestante, setDescansoRestante] = useState<number | null>(null);
 
@@ -66,12 +67,29 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     [rutina, ejercicioIndex],
   );
 
+  // Determine the actual "actionable" exercise (simple or sub-exercise)
+  const activeDescriptor = useMemo(() => {
+    if (!ejercicioActual) return null;
+    if (ejercicioActual.tipo === 'superset') {
+      return ejercicioActual.ejercicios?.[subEjercicioIndex] || null;
+    }
+    return ejercicioActual;
+  }, [ejercicioActual, subEjercicioIndex]);
+
+  const getTargetValue = (val: number | number[] | undefined, serie: number): number => {
+    if (val === undefined) return 0;
+    if (Array.isArray(val)) {
+      return val[serie - 1] ?? val[val.length - 1] ?? 0;
+    }
+    return val;
+  };
+
   const proximoEjercicio = useMemo(
     () => (rutina && ejercicioIndex < rutina.ejercicios.length - 1 ? rutina.ejercicios[ejercicioIndex + 1] : null),
     [rutina, ejercicioIndex]
   );
 
-  // Timer de descanso (existente)
+  // Timer de descanso
   useEffect(() => {
     if (descansoRestante === null) return;
     if (descansoRestante <= 0) {
@@ -93,15 +111,14 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [descansoRestante, pulse]);
 
-  // Timer de ejercicio activo (nuevo para tipo 'tiempo')
+  // Timer de ejercicio activo
   useEffect(() => {
     if (!enEjercicio || tiempoActivo === null) return;
 
     if (tiempoActivo <= 0) {
-      // Tiempo completado, finalizar serie automáticamente
       setEnEjercicio(false);
       setTiempoActivo(null);
-      Vibration.vibrate(500); // Vibración más larga al terminar ejercicio
+      Vibration.vibrate(500);
       completeSerieLogic();
       return;
     }
@@ -125,41 +142,61 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
   }));
 
   const startSeriesTime = () => {
-    if (ejercicioActual?.tipo === 'tiempo' && ejercicioActual.duracionSegundos) {
-      setTiempoActivo(ejercicioActual.duracionSegundos);
-      setEnEjercicio(true);
+    if (activeDescriptor?.tipo === 'tiempo') {
+      const dur = getTargetValue(activeDescriptor.duracionSegundos, serieActual);
+      if (dur > 0) {
+        setTiempoActivo(dur);
+        setEnEjercicio(true);
+      } else {
+        completeSerieLogic(); // Skip if 0
+      }
     }
   };
 
   const completeSerieLogic = () => {
     if (!ejercicioActual) return;
 
-    if (serieActual < ejercicioActual.series) {
-      setSerieActual(serieActual + 1);
-      if (ejercicioActual.descansoEntreSeries > 0) {
-        setDescansoRestante(ejercicioActual.descansoEntreSeries);
+    if (ejercicioActual.tipo === 'superset') {
+      const subs = ejercicioActual.ejercicios || [];
+      if (subEjercicioIndex < subs.length - 1) {
+        // Move to next sub immediately
+        setSubEjercicioIndex(subEjercicioIndex + 1);
+      } else {
+        // End of round
+        finishRound(ejercicioActual);
       }
     } else {
-      // Fin del ejercicio
+      finishRound(ejercicioActual);
+    }
+  };
+
+  const finishRound = (ex: Ejercicio) => {
+    if (serieActual < ex.series) {
+      setSerieActual(serieActual + 1);
+      setSubEjercicioIndex(0); // Reset for superset
+      if (ex.descansoEntreSeries > 0) {
+        setDescansoRestante(ex.descansoEntreSeries);
+      }
+    } else {
+      // Finished exercise
       setPhase('summary');
     }
   };
 
   const handleCompletarSerie = () => {
-    if (!ejercicioActual) return;
+    if (!activeDescriptor) return;
     if (descansoRestante !== null) return;
 
-    if (ejercicioActual.tipo === 'tiempo') {
+    if (activeDescriptor.tipo === 'tiempo') {
       if (!enEjercicio) {
         startSeriesTime();
       } else {
-        // Opción de terminar antes (skip)
+        // Skip
         setEnEjercicio(false);
         setTiempoActivo(null);
         completeSerieLogic();
       }
     } else {
-      // Repeticiones
       completeSerieLogic();
     }
   };
@@ -168,6 +205,7 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     if (ejercicioIndex < (rutina?.ejercicios.length ?? 0) - 1) {
       setEjercicioIndex(ejercicioIndex + 1);
       setSerieActual(1);
+      setSubEjercicioIndex(0);
       setPhase('active');
     } else {
       finalizarEntrenamiento();
@@ -194,6 +232,44 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
     const randomIndex = Math.floor(Math.random() * memeSources.length);
     setMemeSource(memeSources[randomIndex]);
     setPhase('finished');
+  };
+
+  const renderPreviewItem = (ex: Ejercicio, idx: number) => {
+    if (ex.tipo === 'superset') {
+      return (
+        <RNView key={ex.id} style={styles.previewCard}>
+          <RNView style={styles.previewIndexCircle}>
+            <Text style={styles.previewIndexText}>{idx + 1}</Text>
+          </RNView>
+          <RNView style={{ flex: 1 }}>
+            <Text style={[styles.previewCardTitle, { color: colors.primary }]}>SUPERSET</Text>
+            <Text style={styles.previewCardDetails}>{ex.series} series (compartidas)</Text>
+            {ex.ejercicios?.map((sub, i) => (
+              <RNView key={sub.id} style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginRight: 5 }}>•</Text>
+                <Text style={{ color: colors.text, fontSize: 14 }}>{sub.nombre}</Text>
+              </RNView>
+            ))}
+          </RNView>
+        </RNView>
+      );
+    }
+
+    const target = ex.tipo === 'tiempo'
+      ? `${ex.series} x ${Array.isArray(ex.duracionSegundos) ? 'Var' : ex.duracionSegundos}s`
+      : `${ex.series} x ${Array.isArray(ex.repeticiones) ? 'Var' : ex.repeticiones} reps`;
+
+    return (
+      <RNView key={ex.id} style={styles.previewCard}>
+        <RNView style={styles.previewIndexCircle}>
+          <Text style={styles.previewIndexText}>{idx + 1}</Text>
+        </RNView>
+        <RNView>
+          <Text style={styles.previewCardTitle}>{ex.nombre}</Text>
+          <Text style={styles.previewCardDetails}>{target}</Text>
+        </RNView>
+      </RNView>
+    );
   };
 
   if (phase === 'finished' && memeSource) {
@@ -233,22 +309,7 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.previewSubtitle}>{rutina.nombre}</Text>
 
           <ScrollView style={styles.exerciseList} contentContainerStyle={{ gap: spacing.sm }}>
-            {rutina.ejercicios.map((ex, idx) => (
-              <RNView key={ex.id} style={styles.previewCard}>
-                <RNView style={styles.previewIndexCircle}>
-                  <Text style={styles.previewIndexText}>{idx + 1}</Text>
-                </RNView>
-                <RNView>
-                  <Text style={styles.previewCardTitle}>{ex.nombre}</Text>
-                  <Text style={styles.previewCardDetails}>
-                    {ex.tipo === 'tiempo'
-                      ? `${ex.series} series x ${ex.duracionSegundos}s`
-                      : `${ex.series} series x ${ex.repeticiones} reps`
-                    }
-                  </Text>
-                </RNView>
-              </RNView>
-            ))}
+            {rutina.ejercicios.map(renderPreviewItem)}
           </ScrollView>
 
           <RNView style={styles.actions}>
@@ -272,10 +333,19 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
 
           <ScrollView style={styles.exerciseList} contentContainerStyle={{ gap: spacing.sm }}>
             <Text style={styles.sectionHeader}>Completados</Text>
-            {completed.map((ex, idx) => (
+            {completed.map((ex) => (
               <RNView key={ex.id} style={[styles.previewCard, styles.cardCompleted]}>
                 <Ionicons name="checkmark-circle" size={24} color={colors.success} />
-                <Text style={[styles.previewCardTitle, { textDecorationLine: 'line-through', opacity: 0.7 }]}>{ex.nombre}</Text>
+                <RNView>
+                  <Text style={[styles.previewCardTitle, { textDecorationLine: 'line-through', opacity: 0.7 }]}>
+                    {ex.nombre || (ex.tipo === 'superset' ? 'Superset' : '')}
+                  </Text>
+                  {ex.tipo === 'superset' && (
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                      {ex.ejercicios?.map(s => s.nombre).join(' + ')}
+                    </Text>
+                  )}
+                </RNView>
               </RNView>
             ))}
 
@@ -287,7 +357,14 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
                     <RNView style={[styles.previewIndexCircle, { backgroundColor: colors.border }]}>
                       <Text style={styles.previewIndexText}>{ejercicioIndex + 1 + idx + 1}</Text>
                     </RNView>
-                    <Text style={styles.previewCardTitle}>{ex.nombre}</Text>
+                    <RNView>
+                      <Text style={styles.previewCardTitle}>{ex.nombre || (ex.tipo === 'superset' ? 'Superset' : '')}</Text>
+                      {ex.tipo === 'superset' && (
+                        <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                          {ex.ejercicios?.map(s => s.nombre).join(' + ')}
+                        </Text>
+                      )}
+                    </RNView>
                   </RNView>
                 ))}
               </>
@@ -306,23 +383,30 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
   }
 
   // ACTIVE PHASE
-  if (!ejercicioActual) return null;
+  if (!activeDescriptor || !ejercicioActual) return null;
 
-  const esTiempo = ejercicioActual.tipo === 'tiempo';
+  const esTiempo = activeDescriptor.tipo === 'tiempo';
   const mostrarBotonCompletar = !esTiempo || (esTiempo && !enEjercicio);
 
   const textoBoton = esTiempo
     ? (enEjercicio ? 'En curso...' : 'Iniciar Tiempo')
-    : 'Completar serie';
+    : (ejercicioActual.tipo === 'superset' && subEjercicioIndex < (ejercicioActual.ejercicios?.length || 0) - 1)
+      ? 'Siguiente Ejercicio'
+      : 'Completar serie';
+
+  const targetValue = esTiempo
+    ? getTargetValue(activeDescriptor.duracionSegundos, serieActual)
+    : getTargetValue(activeDescriptor.repeticiones, serieActual);
 
   return (
     <ScreenContainer>
       <RNView style={styles.container}>
         <RNView style={styles.headerSection}>
-          <Text style={styles.title}>
-            {rutina.nombre}
-          </Text>
-          <Text style={styles.activeExerciseTitle}>{ejercicioActual.nombre}</Text>
+          <Text style={styles.title}>{rutina.nombre}</Text>
+          {ejercicioActual.tipo === 'superset' && (
+            <Text style={styles.supersetTag}>SUPERSET ({subEjercicioIndex + 1}/{ejercicioActual.ejercicios?.length})</Text>
+          )}
+          <Text style={styles.activeExerciseTitle}>{activeDescriptor.nombre}</Text>
         </RNView>
 
         <RNView style={styles.card}>
@@ -340,8 +424,8 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
               </Text>
               <Text style={styles.activeDetails}>
                 {esTiempo
-                  ? `Objetivo: ${ejercicioActual.duracionSegundos} segundos`
-                  : `${ejercicioActual.repeticiones} Repeticiones`
+                  ? `Objetivo: ${targetValue} segundos`
+                  : `${targetValue} Repeticiones`
                 }
               </Text>
 
@@ -352,10 +436,10 @@ export const EntrenamientoScreen: React.FC<Props> = ({ route, navigation }) => {
               )}
 
               {/* Next Exercise Indicator on last set */}
-              {serieActual === ejercicioActual.series && proximoEjercicio && (
+              {serieActual === ejercicioActual.series && proximoEjercicio && !enEjercicio && (
                 <RNView style={styles.nextExerciseContainer}>
                   <Text style={styles.nextLabel}>Próximo:</Text>
-                  <Text style={styles.nextValue}>{proximoEjercicio.nombre}</Text>
+                  <Text style={styles.nextValue}>{proximoEjercicio.nombre || 'Superset'}</Text>
                 </RNView>
               )}
             </RNView>
@@ -406,6 +490,13 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontWeight: '600',
     marginBottom: 4,
+  },
+  supersetTag: {
+    color: colors.primary,
+    fontWeight: '700',
+    fontSize: 12,
+    marginBottom: 2,
+    letterSpacing: 1,
   },
   activeExerciseTitle: {
     fontSize: 32,

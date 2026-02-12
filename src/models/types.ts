@@ -4,14 +4,23 @@ export interface Usuario {
   nombre: string;
 }
 
-export interface Ejercicio {
+export interface SubEjercicio {
   id: UUID;
   nombre: string;
   tipo: 'repeticiones' | 'tiempo';
+  repeticiones?: number | number[]; // number for backward compat, array for variable
+  duracionSegundos?: number | number[];
+}
+
+export interface Ejercicio {
+  id: UUID;
+  nombre: string;
+  tipo: 'repeticiones' | 'tiempo' | 'superset';
   series: number;
-  repeticiones?: number;
-  duracionSegundos?: number;
+  repeticiones?: number | number[];
+  duracionSegundos?: number | number[];
   descansoEntreSeries: number; // segundos, >= 0
+  ejercicios?: SubEjercicio[]; // Only for type 'superset'
 }
 
 export interface Rutina {
