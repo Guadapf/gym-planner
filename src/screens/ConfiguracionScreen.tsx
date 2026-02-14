@@ -6,6 +6,7 @@ import { colors, spacing } from '../components/Themed';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { AppConfig, Usuario } from '../models/types';
 import { StorageService } from '../storage/storageService';
+import { APP_INFO } from '../config/appInfo';
 
 export const ConfiguracionScreen: React.FC = () => {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
@@ -78,6 +79,21 @@ export const ConfiguracionScreen: React.FC = () => {
         <RNView style={{ marginTop: spacing.md }}>
           <PrimaryButton label="Guardar cambios" onPress={handleGuardar} />
         </RNView>
+
+        <RNView style={styles.divider} />
+
+        <RNView style={styles.aboutContainer}>
+          <Text style={styles.aboutTitle}>Acerca de</Text>
+          <Text style={styles.appName}>
+            {APP_INFO.name} <Text style={{ fontSize: 12 }}>({APP_INFO.status})</Text>
+          </Text>
+          <Text style={styles.version}>Versión {APP_INFO.version}</Text>
+          <Text style={styles.copyright}>
+            © {APP_INFO.year} {APP_INFO.author}
+          </Text>
+          <Text style={styles.copyright}>{APP_INFO.copyright}</Text>
+          <Text style={styles.disclaimer}>{APP_INFO.disclaimer}</Text>
+        </RNView>
       </RNView>
     </ScreenContainer>
   );
@@ -111,6 +127,44 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.card,
     fontSize: 18,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.lg,
+  },
+  aboutContainer: {
+    marginTop: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingBottom: spacing.xl,
+  },
+  aboutTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  appName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  version: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  copyright: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+  },
+  disclaimer: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    fontStyle: 'italic',
   },
 });
 
